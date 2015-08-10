@@ -1,0 +1,156 @@
+<?php
+/**
+ * @file
+ * Node edit form using a tree component.
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function node_edit_tree_menu() {
+
+  // Need to update the access stuff.
+  $items['node/%/tree'] = array(
+    'title' => 'Tree',
+    'type' => MENU_LOCAL_TASK,
+    'page callback' => 'node_edit_tree_page',
+    'page arguments' => array(1),
+    'access callback' => TRUE,
+  );
+
+  $items['node_edit_tree_node_callback'] = array(
+    'type' => MENU_CALLBACK,
+    'title' => 'Node edit tree node callback',
+    'page callback' => 'node_edit_tree_node_callback',
+    'access arguments' => array('access content'),
+  );
+
+  $items['node_edit_tree_fc_callback'] = array(
+    'type' => MENU_CALLBACK,
+    'title' => 'Node edit tree field collection callback',
+    'page callback' => 'node_edit_tree_fc_callback',
+    'access arguments' => array('access content'),
+  );
+
+  return $items;
+
+}
+
+function node_edit_tree_admin_paths_alter(&$paths) {
+  $paths['node/*/tree'] = TRUE;
+  return $paths;
+}
+
+function node_edit_tree_page($nid) {
+  drupal_add_library('system', 'drupal.ajax');
+  drupal_add_library('system', 'jquery.form');
+
+  drupal_add_js(drupal_get_path('module','node_edit_tree') . '/js/tree.js');
+  $html = <<<EOHTML
+  <div id="loaded-node"></div>
+  <a href="#" class="tree-node">Load the node</a>
+  <a href="#" class="tree-fc">Load the field collection</a>
+EOHTML;
+
+  return $html;
+}
+
+function node_edit_tree_fc_callback($eid = NULL) {
+  node_edit_tree_callback('fc', $eid);
+}
+
+
+function node_edit_tree_node_callback($nid = NULL) {
+  node_edit_tree_callback('node', $nid);
+}
+
+function node_edit_tree_callback($type = 'node', $eid = NULL) {
+  if ($type == 'node') {
+    // 2 is the id of the first root content item.
+    $eid = $eid === NULL ? '2' : $eid;
+    module_load_include('inc', 'node', 'node.pages');
+    $node = node_load($eid);
+    watchdog('node', print_r($node, TRUE));
+    $form = drupal_get_form($node->type . '_node_form', $node);
+  }
+  else {
+    $eid = $eid === NULL ? '1' : $eid;
+    module_load_include('inc', 'field_collection', 'field_collection.pages');
+    $entity = field_collection_item_load($eid, TRUE);
+    $form = drupal_get_form('field_collection_item_form', $entity);
+  }
+
+  $form = drupal_render($form);
+
+  $javascript = drupal_add_js(NULL, NULL);
+  $settings = FALSE;
+
+  if (isset($javascript['settings'])) {
+    $settings = '<script type="text/javascript">jQuery.extend(Drupal.settings, '. drupal_json_encode(call_user_func_array('array_merge_recursive', $javascript['settings']['data'])) .');</script>';
+  }
+
+  $html = $form . $settings;
+  print $html;
+}
+
+function node_edit_tree_form_alter(&$form, &$form_state, $form_id) {
+  // Maybe want something in here to check that we are on a 'tree' page insead
+  // of this form_id checking...
+  if ($form_id == 'root_node_form' || $form_id == 'field_collection_item_form') {
+    $fields = element_children($form);
+    foreach ($fields as $field_id) {
+      if (isset($form[$field_id]['#attributes']['class']) && in_array('field-widget-field-collection-tree', $form[$field_id]['#attributes']['class'])) {
+        // Just hide using css.
+        // $form[$field_id]['#attributes']['class'][] = 'element-invisible';
+      }
+    }
+
+    $form['actions']['submit']['#ajax'] = array(
+      'callback' => 'node_edit_tree_node_ajax_callback',
+      'effect' => 'fade',
+      'method' => 'replace',
+      'wrapper' => 'root-node-form',
+      'event' => 'click',
+      'progress' => array('message' => '', 'type' => 'throbber'),
+    );
+    $form['#submit'][] = 'node_edit_form_edit_submit';
+  }
+}
+
+function node_edit_form_edit_submit($form, &$form_state) {
+  $form_state['rebuild'] = TRUE;
+}
+
+function node_edit_tree_node_ajax_callback($form, &$form_state) {
+  // @todo Need to show updated message.
+  return $form;
+}
+
+function node_edit_tree_field_widget_info() {
+  return array(
+    'field_collection_tree' => array(
+      'label' => t('Tree'),
+      'field types' => array('field_collection'),
+      'behaviors' => array(
+        'multiple values' => FIELD_BEHAVIOR_CUSTOM,
+        'default value' => FIELD_BEHAVIOR_NONE,
+      ),
+    ),
+  );
+}
+
+function node_edit_tree_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
+  if ($instance['widget']['type'] == 'field_collection_tree') {
+    return $element;
+  }
+}
+
+function node_edit_tree_theme() {
+  return array(
+    'root_node_form' => array(
+      'arguments' => array(),
+      'template' => 'templates/edit-node-form',
+      'render element' => 'form',
+    ),
+  );
+}
